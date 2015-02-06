@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Gets the certificate chain from a host and decodes it using openssl.
+# 2015-02-04 - Created by Onno Zweers.
+
+host="$1"
+port="$2"
+
+# TODO:
+# Error handling, connection timeout, refused, host not in DNS etc.
+
+usage() {
+  echo "Gets certificate chain from a server and decodes it."
+  echo "Usage:" `basename $0` host [port]
+  exit 1
+}
+
+if [ -z "$host" ] ; then
+  usage;
+fi
+
+if [ -z "$port" ] ; then
+  port=443
+fi
+
+echo \
+| openssl s_client -CAfile /etc/ssl/certs/ca-bundle.crt -showcerts -connect "$host":"$port" -servername "$host" -verify 10 2>/dev/null \
+| awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' \
+| while read line ; do \
+  if [[ $line =~ '-----BEGIN CERTIFICATE-----' ]] ; then
+    ((i++))
+    rawcert="$line"
+  else
+    rawcert="$rawcert"$'\n'"$line"
+    if [[ $line =~ '-----END CERTIFICATE-----' ]] ; then
+      openssl x509 -noout -text <<< "$rawcert"
+    fi
+  fi
+done
