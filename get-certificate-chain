@@ -2,38 +2,139 @@
 
 # Gets the certificate chain from a host and decodes it using openssl.
 # 2015-02-04 - Created by Onno Zweers.
-
-host="$1"
-port="$2"
+# 2015-02-20 - Read chain from a file - Onno
+# 2015-02-22 - Show chain structure - Onno
 
 # TODO:
 # Error handling, connection timeout, refused, host not in DNS etc.
 
 usage() {
-  echo "Gets certificate chain from a server and decodes it."
-  echo "Usage:" `basename $0` host [port]
+  echo "Decodes entire certificate chain from a from a server or a file."
+  echo "Usage:"
+  echo "  " `basename $0` host [port]
+  echo "  " `basename $0` chain_file
   exit 1
 }
 
-if [ -z "$host" ] ; then
+cafile=/etc/ssl/certs/ca-bundle.crt
+if [ ! -f "$cafile" ] ; then
+  echo "File $cafile not found."
+  exit 1
+fi 
+
+location="$1"
+if [ -z "$location" ] ; then
   usage;
 fi
 
-if [ -z "$port" ] ; then
-  port=443
-fi
-
-echo \
-| openssl s_client -CAfile /etc/ssl/certs/ca-bundle.crt -showcerts -connect "$host":"$port" -servername "$host" -verify 10 2>/dev/null \
-| awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' \
-| while read line ; do \
-  if [[ $line =~ '-----BEGIN CERTIFICATE-----' ]] ; then
-    ((i++))
-    rawcert="$line"
-  else
-    rawcert="$rawcert"$'\n'"$line"
-    if [[ $line =~ '-----END CERTIFICATE-----' ]] ; then
-      openssl x509 -noout -text <<< "$rawcert"
+decode_certs() {
+  while read line ; do \
+    if [[ $line =~ '-----BEGIN CERTIFICATE-----' ]] ; then
+      ((i++))
+      rawcert="$line"
+    else
+      rawcert="$rawcert"$'\n'"$line"
+      if [[ $line =~ '-----END CERTIFICATE-----' ]] ; then
+        cert[$i]=$(openssl x509 -noout -text <<< "$rawcert")
+        echo "${cert[i]}"
+        issuer[$i]=$(grep 'Issuer: ' <<< "${cert[i]}" | sed -e 's/.*Issuer: //')
+        subject[$i]=$(grep 'Subject: ' <<< "${cert[i]}" | sed -e 's/.*Subject: //')
+      fi
     fi
+  done
+}
+
+# Location can be filename or hostname.
+if [ -f "$location" ] ; then
+  chain=$(awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' < "$location")
+else
+  port=443 ; [ -n "$2" ] && port="$2"
+  chain=$(echo Q \
+            | openssl s_client \
+                -CAfile "$cafile" \
+                -showcerts \
+                -connect "$location":"$port" \
+                -servername "$location" \
+                -verify 15 \
+                2>/dev/null \
+            | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
+fi
+decode_certs <<< "$chain"
+
+
+echo
+echo "=== Chain structure ==="
+
+# This may look a lot of code, but it has to deal with these possible situations:
+# 1. self-signed certificates
+# 2. chain loops
+# 3. multiple seperate chains mixed in one file
+# 4. forked chains (same issuer issued multiple certs)
+
+get_issuer() {
+  # Finds the cert in our list that is the issuer of the given cert.
+  certnr=$1
+  issuer_found=false
+  for s in $(seq 1 ${#cert[@]}) ; do
+    if [ "${issuer[certnr]}" = "${subject[s]}" ] ; then
+      # Return issuer only when cert is not self-signed because we don't want endless loop
+      if [ $i -ne $s ] ; then
+        echo $s
+      fi
+      return
+    fi
+  done
+  # Issuer is not in our list of certs.
+  return
+}
+
+get_issued() {
+  # Finds all certs in our list that have been issued by the given cert.
+  certnr=$1
+  issued_numbers=
+  for s in $(seq 1 ${#cert[@]}) ; do
+    if [ "${issuer[s]}" = "${subject[certnr]}" ] ; then
+      # Return issued only when cert is not self-signed because we don't want endless loop
+      if [ $i -ne $s ] ; then
+        echo $s
+      fi
+    fi
+  done
+  return
+}
+
+show_issued_certs() {
+  cert_nr=$1
+  depth=$2
+  for issued_nr in $(get_issued $cert_nr) ; do
+    for indent in $(seq 1 $depth) ; do
+      echo -n "  "
+    done
+    echo -n "└─"
+    echo "${subject[issued_nr]}"
+    if [ $depth -gt ${#cert[@]} ] ; then
+      echo "Depth $depth > number of certs ${#cert[@]}."
+      return
+    fi
+    show_issued_certs $issued_nr $((depth + 1))
+  done
+}
+
+# Iterate over all certs to find the top (that has no issuer inside this chain)
+# If chain is messy, there can be several top certs; show them all.
+for i in $(seq 1 ${#cert[@]}) ; do
+  issuer_nr=$(get_issuer $i)
+  if [ -z "$issuer_nr" ] ; then
+    # This cert does not seem to have an issuer inside the chain. Probably top of chain.
+    depth=0
+    # Show the issuer of top cert, if not self-signed.
+    if [ "${issuer[i]}" != "${subject[i]}" ] ; then
+      echo "${issuer[i]} (not provided in chain - root cert?)"
+      depth=$((depth + 1))
+      echo "└─${subject[i]}"
+    else
+      echo "${subject[i]} (self-signed - root cert?)"
+    fi
+    show_issued_certs $i $depth
   fi
 done
