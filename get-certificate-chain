@@ -9,7 +9,7 @@
 # Error handling, connection timeout, refused, host not in DNS etc.
 
 usage() {
-  echo "Decodes entire certificate chain from a from a server or a file."
+  echo "Decodes entire certificate chain from a server or a file."
   echo "Usage:"
   echo "  " `basename $0` host [port]
   echo "  " `basename $0` chain_file
