@@ -142,7 +142,7 @@ for i in $(seq 1 ${#cert[@]}) ; do
       if grep --silent "Subject: ${issuer[i]}$" "$cafile" ; then
         echo "│   Found in root cert list $cafile."
       else
-        echo "│   Not in root cert list $cafile. Is your chain complete?"
+        echo "│   Not in root cert list $cafile. Is the chain complete?"
       fi
       depth=$((depth + 1))
       echo "└─${subject[i]}"
