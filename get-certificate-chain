@@ -14,7 +14,7 @@
 # Check if cafile is the original from the package (rpm --verify on RHEL)
 
 usage() {
-  echo "Decodes entire certificate chain from a from a server or a file."
+  echo "Decodes entire certificate chain from a server or a file."
   echo "Usage:"
   echo "  " `basename $0` host [port]
   echo "  " `basename $0` chain_file
