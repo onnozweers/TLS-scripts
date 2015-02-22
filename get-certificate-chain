@@ -1,15 +1,20 @@
 #!/bin/bash
 
-# Gets the certificate chain from a host and decodes it using openssl.
+# Reads certificate chain from a host or a file and decode it using openssl.
+
 # 2015-02-04 - Created by Onno Zweers.
 # 2015-02-20 - Read chain from a file - Onno
 # 2015-02-22 - Show chain structure - Onno
+# 2015-02-22 - Check SHA1. Check if chain top cert issued by root CA cert - Onno
 
 # TODO:
 # Error handling, connection timeout, refused, host not in DNS etc.
+# Check not before and not after (and warn in time). Does openssl do this?
+# Check CRLs. Check OCSP. Doesn't openssl do this?
+# Check if cafile is the original from the package (rpm --verify on RHEL)
 
 usage() {
-  echo "Decodes entire certificate chain from a server or a file."
+  echo "Decodes entire certificate chain from a from a server or a file."
   echo "Usage:"
   echo "  " `basename $0` host [port]
   echo "  " `basename $0` chain_file
@@ -106,14 +111,18 @@ get_issued() {
 show_issued_certs() {
   cert_nr=$1
   depth=$2
+  indent=""
   for issued_nr in $(get_issued $cert_nr) ; do
-    for indent in $(seq 1 $depth) ; do
-      echo -n "  "
+    for n in $(seq 1 $depth) ; do
+      indent="${indent}  "
     done
-    echo -n "└─"
-    echo "${subject[issued_nr]}"
+    # Assuming the terminal supports UTF8.
+    echo "${indent}└─${subject[issued_nr]}"
+    if grep --silent "Signature Algorithm: sha1With" <<< "${cert[issued_nr]}" ; then
+      echo "${indent}  │   Warning: sha1 signed certificate."
+    fi
     if [ $depth -gt ${#cert[@]} ] ; then
-      echo "Depth $depth > number of certs ${#cert[@]}."
+      echo "Depth $depth > number of certs ${#cert[@]}. Is there a loop in the chain?"
       return
     fi
     show_issued_certs $issued_nr $((depth + 1))
@@ -129,11 +138,35 @@ for i in $(seq 1 ${#cert[@]}) ; do
     depth=0
     # Show the issuer of top cert, if not self-signed.
     if [ "${issuer[i]}" != "${subject[i]}" ] ; then
-      echo "${issuer[i]} (not provided in chain - root cert?)"
+      echo "${issuer[i]}"
+      if grep --silent "Subject: ${issuer[i]}$" "$cafile" ; then
+        echo "│   Found in root cert list $cafile."
+      else
+        echo "│   Not in root cert list $cafile. Is your chain complete?"
+      fi
       depth=$((depth + 1))
       echo "└─${subject[i]}"
+        # Check SHA1
+      if grep --silent "Signature Algorithm: sha1With" <<< "${cert[i]}" ; then
+        echo "  │    Warning: sha1 signed certificate."
+      fi
     else
-      echo "${subject[i]} (self-signed - root cert?)"
+      # Top cert is self signed. That's acceptable if it's an official root CA cert.
+      echo "${subject[i]}"
+      echo "│   Self-signed."
+      if grep --silent "Subject: ${subject[i]}$" "$cafile" ; then
+        echo "│   Found in root cert list $cafile. Probably no need to put this in the chain."
+        # Check SHA1
+        if grep --silent "Signature Algorithm: sha1With" <<< "${cert[i]}" ; then
+          echo "│   Cert is sha1 signed, but that's OK because it's in the root cert list."
+        fi
+      else
+        echo "│   Not in root cert list $cafile. Are you sure this chain provides trust?"
+        # Check SHA1
+        if grep --silent "Signature Algorithm: sha1With" <<< "${cert[i]}" ; then
+          echo "  │    Warning: sha1 signed certificate."
+        fi
+      fi
     fi
     show_issued_certs $i $depth
   fi
