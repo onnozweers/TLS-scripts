@@ -6,12 +6,14 @@
 # 2015-02-20 - Read chain from a file - Onno
 # 2015-02-22 - Show chain structure - Onno
 # 2015-02-22 - Check SHA1. Check if chain top cert issued by root CA cert - Onno
+# 2015-02-23 - Show subjectAltNames. - Onno
 
 # TODO:
 # Error handling, connection timeout, refused, host not in DNS etc.
 # Check not before and not after (and warn in time). Does openssl do this?
 # Check CRLs. Check OCSP. Doesn't openssl do this?
 # Check if cafile is the original from the package (rpm --verify on RHEL)
+
 
 usage() {
   echo "Decodes entire certificate chain from a server or a file."
@@ -121,6 +123,12 @@ show_issued_certs() {
     if grep --silent "Signature Algorithm: sha1With" <<< "${cert[issued_nr]}" ; then
       echo "${indent}  │   Warning: sha1 signed certificate."
     fi
+    subjectAltNames=$(egrep -o 'DNS:[^,]+' <<< "${cert[issued_nr]}" | sed -e 's/DNS://')
+    if [ -n "$subjectAltNames" ] ; then
+      for name in $subjectAltNames ; do
+        echo "${indent}  │   subjectAltName: $name."
+      done
+    fi 
     if [ $depth -gt ${#cert[@]} ] ; then
       echo "Depth $depth > number of certs ${#cert[@]}. Is there a loop in the chain?"
       return
