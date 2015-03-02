@@ -7,6 +7,7 @@
 # 2015-02-22 - Show chain structure - Onno
 # 2015-02-22 - Check SHA1. Check if chain top cert issued by root CA cert - Onno
 # 2015-02-23 - Show subjectAltNames. - Onno
+# 2015-03-02 - Choose from list of CA bundle locations - Onno
 
 # TODO:
 # Error handling, connection timeout, refused, host not in DNS etc.
