@@ -65,14 +65,14 @@ if [ -f "$location" ] ; then
 else
   port=443 ; [ -n "$2" ] && port="$2"
   chain=$(echo Q \
-            | openssl s_client \
-                -CAfile "$cafile" \
-                -showcerts \
-                -connect "$location":"$port" \
-                -servername "$location" \
-                -verify 15 \
-                2>/dev/null \
-            | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
+          | openssl s_client \
+              -CAfile "$cafile" \
+              -showcerts \
+              -connect "$location":"$port" \
+              -servername "$location" \
+              -verify 15 \
+              2>/dev/null \
+          | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
 fi
 decode_certs <<< "$chain"
 
