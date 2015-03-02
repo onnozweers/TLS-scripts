@@ -23,11 +23,19 @@ usage() {
   exit 1
 }
 
-cafile=/etc/ssl/certs/ca-bundle.crt
-if [ ! -f "$cafile" ] ; then
-  echo "File $cafile not found."
+# Choose from a list of CA root certificate file bundles.
+cafiles="/etc/ssl/certs/ca-bundle.crt /etc/pki/tls/certs/ca-bundle.crt"
+for file in $cafiles ; do
+  # Does this cabundle exit on this system?
+  if [ -f "$file" ] ; then
+    cafile="$file"
+    continue
+  fi
+done
+if [ -z "$cafile" ] ; then
+  echo "None of these root CA certificate bundles found: $cafile"
   exit 1
-fi 
+fi
 
 location="$1"
 if [ -z "$location" ] ; then
