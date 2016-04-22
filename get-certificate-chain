@@ -7,7 +7,7 @@
 # 2015-02-22 - Show chain structure - Onno
 # 2015-02-22 - Check SHA1. Check if chain top cert issued by root CA cert - Onno
 # 2015-02-23 - Show subjectAltNames. - Onno
-# 2015-03-02 - Choose from list of CA bundle locations - Onno
+# 2015-03-03 - Use grid root certs if available. - Onno
 
 # TODO:
 # Error handling, connection timeout, refused, host not in DNS etc.
@@ -19,22 +19,35 @@
 usage() {
   echo "Decodes entire certificate chain from a server or a file."
   echo "Usage:"
-  echo "  " `basename $0` host [port]
-  echo "  " `basename $0` chain_file
+  echo "  " `basename $0` " host [port]"
+  echo "  " `basename $0` " chain_file"
   exit 1
 }
 
-# Choose from a list of CA root certificate file bundles.
+
+stderrfile=$(mktemp)
+
+# Choose CA root certificate bundle. First we try grid certificates.
+capaths="/etc/grid-security/certificates/"
+for path in $capaths ; do
+  if [ -d "$path" ] ; then
+    capath="$path"
+    capath_args="-CApath $path"
+    continue
+  fi
+done
+# Can we find a cafile containing root cert bundle?
 cafiles="/etc/ssl/certs/ca-bundle.crt /etc/pki/tls/certs/ca-bundle.crt"
 for file in $cafiles ; do
   # Does this cabundle exit on this system?
   if [ -f "$file" ] ; then
     cafile="$file"
+    cafile_args="-CAfile $file"
     continue
   fi
 done
-if [ -z "$cafile" ] ; then
-  echo "None of these root CA certificate bundles found: $cafile"
+if [ -z "$cafile" -a -z "$capath" ] ; then
+  echo "No root CA certificates found. Searched these locations: $capath $cafile"
   exit 1
 fi
 
@@ -66,14 +79,30 @@ if [ -f "$location" ] ; then
 else
   port=443 ; [ -n "$2" ] && port="$2"
   chain=$(echo Q \
-          | openssl s_client \
-              -CAfile "$cafile" \
-              -showcerts \
-              -connect "$location":"$port" \
-              -servername "$location" \
-              -verify 15 \
-              2>/dev/null \
-          | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
+            | openssl s_client \
+                -connect "$location":"$port" \
+                -servername "$location" \
+                $capath_args \
+                $cafile_args \
+                -showcerts \
+                -verify 15 \
+                2> "$stderrfile" \
+            | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
+  if [ "$DEBUG" = "y" ] ; then
+    echo "openssl s_client -connect \"$location\":\"$port\" -servername \"$location\" $capath_args $cafile_args -showcerts -verify 15"
+  fi
+  # If SNI is not supported by the server, try again without SNI.
+  if grep --silent "getaddrinfo: Servname not supported for ai_socktype" "$stderrfile" ; then
+    echo "SNI not supported; trying again without SNI."
+    chain=$(echo Q \
+              | openssl s_client \
+                  -connect "$location":"$port" \
+                  $capath_args \
+                  $cafile_args \
+                  -showcerts \
+                  -verify 15 \
+              | awk '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/' )
+  fi
 fi
 decode_certs <<< "$chain"
 
@@ -188,3 +217,6 @@ for i in $(seq 1 ${#cert[@]}) ; do
     show_issued_certs $i $depth
   fi
 done
+
+
+rm "$stderrfile"
